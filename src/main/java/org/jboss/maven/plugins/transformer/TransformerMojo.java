@@ -22,9 +22,13 @@
 
 package org.jboss.maven.plugins.transformer;
 
+import java.io.Closeable;
 import java.io.File;
 import java.io.FileFilter;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.instrument.ClassFileTransformer;
 import java.net.MalformedURLException;
@@ -37,7 +41,12 @@ import java.util.Enumeration;
 import java.util.List;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
+import java.util.jar.JarOutputStream;
 import java.util.regex.Pattern;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
 
 import javassist.ClassPool;
 import javassist.CtClass;
@@ -149,21 +158,114 @@ public class TransformerMojo extends AbstractMojo
                   {
                      file.mkdirs(); // create dirs
                   }
-                  else if (filter == null || filter.accept(file))
+                  else
                   {
                      file.getParentFile().mkdirs(); // make sure we have dirs
 
-                     String className = name.replace("/", ".");
-                     TransformationTarget tt = new TransformationTarget(className, file);
-                     tt.writeOutChanges();
+                     if (name.endsWith(".class") && (filter == null || filter.accept(file)))
+                     {
+                        String className = name.replace("/", ".");
+                        TransformationTarget tt = new TransformationTarget(className, file);
+                        tt.writeOutChanges();
+                     }
+                     else // just write down the file
+                     {
+                        try
+                        {
+                           InputStream is = jarFile.getInputStream(entry);
+                           FileOutputStream os = new FileOutputStream(file);
+                           try
+                           {
+                              int b;
+                              while ((b = is.read()) != -1)
+                                 os.write(b);
+                              os.flush();
+                           }
+                           finally
+                           {
+                              safeClose(is);
+                              safeClose(os);
+                           }
+                        }
+                        catch (IOException e)
+                        {
+                           throw new MojoExecutionException("Cannot write jar entry to file.", e);
+                        }
+                     }
                   }
                }
             }
          });
+
+         File copy = new File(parent, file.getName() + ".copy");
+         FileOutputStream fos = new FileOutputStream(copy);
+         JarOutputStream jos = new JarOutputStream(fos, jarFile.getManifest());
+         try
+         {
+            for (File f : temp.listFiles())
+               writeJar(jos, f, "");
+            jos.flush();
+         }
+         finally
+         {
+            safeClose(fos);
+         }
       }
       catch (Exception e)
       {
          throw new RuntimeException(e);
+      }
+   }
+
+   protected static void safeClose(Closeable c)
+   {
+      try
+      {
+         c.close();
+      }
+      catch (Exception ignored)
+      {
+      }
+   }
+
+   protected void writeJar(JarOutputStream jos, File src, String prefix) throws IOException
+   {
+      if (src.isDirectory())
+      {
+         // create / init the zip entry
+         prefix += (src.getName() + "/");
+         ZipEntry entry = new ZipEntry(prefix);
+         entry.setTime(src.lastModified());
+         entry.setMethod(JarOutputStream.STORED);
+         entry.setSize(0L);
+         entry.setCrc(0L);
+         jos.putNextEntry(entry);
+         jos.closeEntry();
+
+         // process the sub-directories
+         File[] files = src.listFiles();
+         for (File file : files)
+            writeJar(jos, file, prefix);
+      }
+      else if (src.isFile())
+      {
+         // create / init the zip entry
+         ZipEntry entry = new ZipEntry(prefix + src.getName());
+         entry.setTime(src.lastModified());
+         jos.putNextEntry(entry);
+         // dump the file
+         FileInputStream in = new FileInputStream(src);
+         try
+         {
+            int b;
+            while ((b = in.read()) != -1)
+               jos.write(b);
+         }
+         finally
+         {
+            safeClose(in);
+            jos.closeEntry();
+         }
       }
    }
 
@@ -388,7 +490,7 @@ public class TransformerMojo extends AbstractMojo
             }
             finally
             {
-               out.close();
+               safeClose(out);
             }
          }
          catch (Exception e)
