@@ -32,11 +32,13 @@ import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import javassist.ClassPool;
 import javassist.CtClass;
 import javassist.LoaderClassPath;
 import org.apache.maven.artifact.DependencyResolutionRequiredException;
+import org.apache.maven.model.Build;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.MojoFailureException;
@@ -45,12 +47,11 @@ import org.apache.maven.project.MavenProject;
 /**
  * Transform current classes with ClassFileTransformer instance.
  *
+ * @author <a href="mailto:ales.justin@jboss.org">Ales Justin</a>
+ * @author Steve Ebersole
  * @goal bytecode
  * @phase compile
  * @requiresDependencyResolution
- *
- * @author <a href="mailto:ales.justin@jboss.org">Ales Justin</a>
- * @author Steve Ebersole
  */
 public class TransformerMojo extends AbstractMojo
 {
@@ -67,9 +68,16 @@ public class TransformerMojo extends AbstractMojo
     * Regexp pattern for matching classes that need to be transformed.
     *
     * @parameter
+    */
+   protected String filterPattern;
+
+   /**
+    * The transformer class name.
+    *
+    * @parameter
     * @required
     */
-   protected String filter;
+   protected String transformerClassName;
 
    private ClassLoader classLoader;
    private LoaderClassPath loaderClassPath;
@@ -86,17 +94,78 @@ public class TransformerMojo extends AbstractMojo
 
       try
       {
-         transformer = getTransformer();
-
          classPool = new ClassPool(true);
          classPool.appendClassPath(loaderClassPath);
 
-         // TODO
+         FileFilter filter = getFilter();
+
+         Build build = project.getBuild();
+         String output = build.getOutputDirectory();
+         File outputDir = new File(output);
+
+         recurse(outputDir, filter, "");
       }
       finally
       {
          loaderClassPath.close();
          classLoader = null;
+      }
+   }
+
+   protected void recurse(File current, FileFilter filter, String name) throws MojoExecutionException
+   {
+      if (current.isDirectory())
+      {
+         File[] files = current.listFiles(filter);
+         if (files == null)
+            throw new IllegalArgumentException("Null files, weird I/O error: " + current);
+
+         if (name.length() > 0)
+            name += ".";
+
+         for (File f : files)
+         {
+            recurse(f, filter, name + f.getName());
+         }
+      }
+      else
+      {
+         if (name.endsWith(".class"))
+         {
+            TransformationTarget tt = new TransformationTarget(name);
+            tt.writeOutChanges();
+         }
+      }
+   }
+
+   /**
+    * Get file filter.
+    *
+    * @return the file filter
+    */
+   protected FileFilter getFilter()
+   {
+      if (filterPattern == null)
+      {
+         return new FileFilter()
+         {
+            public boolean accept(File file)
+            {
+               return true;
+            }
+         };
+      }
+      else
+      {
+         return new FileFilter()
+         {
+            Pattern patter = Pattern.compile(filterPattern);
+
+            public boolean accept(File file)
+            {
+               return patter.matcher(file.getPath()).find();
+            }
+         };
       }
    }
 
@@ -107,7 +176,22 @@ public class TransformerMojo extends AbstractMojo
     */
    protected ClassFileTransformer getTransformer()
    {
-      return null;
+      if (transformer == null)
+      {
+         if (transformerClassName == null)
+            throw new IllegalArgumentException("Missing transformer class name!");
+
+         try
+         {
+            Class<?> aClass = classLoader.loadClass(transformerClassName);
+            transformer = (ClassFileTransformer) aClass.newInstance();
+         }
+         catch (Exception e)
+         {
+            throw new RuntimeException(e);
+         }
+      }
+      return transformer;
    }
 
    /**
@@ -181,7 +265,7 @@ public class TransformerMojo extends AbstractMojo
             try
             {
                byte[] original = ctClass.toBytecode();
-               byte[] transformed = transformer.transform(classLoader, ctClass.getName(), null, null, original);
+               byte[] transformed = getTransformer().transform(classLoader, ctClass.getName(), null, null, original);
                out.write(transformed);
                out.flush();
                if (classFileLocation.setLastModified(System.currentTimeMillis()) == false)
@@ -199,5 +283,35 @@ public class TransformerMojo extends AbstractMojo
             throw new MojoExecutionException("Unable to write out modified class file", e);
          }
       }
+   }
+
+   public MavenProject getProject()
+   {
+      return project;
+   }
+
+   public void setProject(MavenProject project)
+   {
+      this.project = project;
+   }
+
+   public String getFilterPattern()
+   {
+      return filterPattern;
+   }
+
+   public void setFilterPattern(String filterPattern)
+   {
+      this.filterPattern = filterPattern;
+   }
+
+   public String getTransformerClassName()
+   {
+      return transformerClassName;
+   }
+
+   public void setTransformerClassName(String transformerClassName)
+   {
+      this.transformerClassName = transformerClassName;
    }
 }
