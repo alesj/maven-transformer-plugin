@@ -28,10 +28,15 @@ import java.io.FileOutputStream;
 import java.io.OutputStream;
 import java.lang.instrument.ClassFileTransformer;
 import java.net.MalformedURLException;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Enumeration;
 import java.util.List;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
 import java.util.regex.Pattern;
 
 import javassist.ClassPool;
@@ -85,25 +90,113 @@ public class TransformerMojo extends AbstractMojo
    private ClassFileTransformer transformer;
 
    /**
+    * Execute transformation from java cmd.
+    *
+    * The args are:
+    * - jar path
+    * - transformer
+    * - optional filter
+    *
+    * @param args the args
+    */
+   public static void main(String[] args)
+   {
+      if (args == null || args.length < 2)
+         throw new IllegalArgumentException("Illegal args: " + Arrays.toString(args));
+
+      TransformerMojo tm = new TransformerMojo();
+      tm.transformerClassName = args[1];
+      tm.filterPattern = (args.length > 2) ? args[2] : null;
+
+      String jar = args[0];
+      tm.transformJar(jar);
+   }
+
+   protected void transformJar(String jar)
+   {
+      File file = new File(jar);
+      if (file.exists() == false)
+         throw new IllegalArgumentException("No such jar file: " + jar);
+
+      File parent = file.getParentFile();
+      final File temp = new File(parent, file.getName() + ".tmp");
+      if (temp.exists())
+      {
+         getLog().info("Temp dir already exists, potential old code present: " + temp);
+      }
+      else
+      {
+         if (temp.mkdir() == false)
+            throw new IllegalArgumentException("Cannot create temp dir: " + temp);
+      }
+
+      try
+      {
+         final JarFile jarFile = new JarFile(file);
+         final FileFilter filter = getFilter();
+
+         execute(TransformerMojo.class.getClassLoader(), new Action()
+         {
+            public void execute() throws MojoExecutionException
+            {
+               Enumeration<JarEntry> entries = jarFile.entries();
+               while (entries.hasMoreElements())
+               {
+                  JarEntry entry = entries.nextElement();
+                  String name = entry.getName();
+                  File file = new File(temp, name);
+                  if (entry.isDirectory())
+                  {
+                     file.mkdirs(); // create dirs
+                  }
+                  else if (filter == null || filter.accept(file))
+                  {
+                     file.getParentFile().mkdirs(); // make sure we have dirs
+
+                     String className = name.replace("/", ".");
+                     TransformationTarget tt = new TransformationTarget(className, file);
+                     tt.writeOutChanges();
+                  }
+               }
+            }
+         });
+      }
+      catch (Exception e)
+      {
+         throw new RuntimeException(e);
+      }
+   }
+
+   /**
     * {@inheritDoc}
     */
    public void execute() throws MojoExecutionException, MojoFailureException
    {
-      classLoader = buildProjectCompileClassLoader();
-      loaderClassPath = new LoaderClassPath(classLoader);
+      execute(buildProjectCompileClassLoader(), new Action()
+      {
+         public void execute() throws MojoExecutionException
+         {
+            FileFilter filter = getFilter();
 
+            Build build = project.getBuild();
+            String output = build.getOutputDirectory();
+            File outputDir = new File(output);
+
+            recurse(outputDir, filter, "");
+         }
+      });
+   }
+
+   protected void execute(ClassLoader cl, Action action) throws MojoExecutionException, MojoFailureException
+   {
+      classLoader = cl;
+      loaderClassPath = new LoaderClassPath(classLoader);
       try
       {
          classPool = new ClassPool(true);
          classPool.appendClassPath(loaderClassPath);
 
-         FileFilter filter = getFilter();
-
-         Build build = project.getBuild();
-         String output = build.getOutputDirectory();
-         File outputDir = new File(output);
-
-         recurse(outputDir, filter, "");
+         action.execute();
       }
       finally
       {
@@ -238,6 +331,21 @@ public class TransformerMojo extends AbstractMojo
       }
    }
 
+   private static File toFile(URL url) throws MojoExecutionException
+   {
+      if (url == null)
+         throw new MojoExecutionException("No such class name: " + url);
+
+      try
+      {
+         return new File(url.toURI());
+      }
+      catch (Exception e)
+      {
+         throw new MojoExecutionException(e.getMessage());
+      }
+   }
+
    class TransformationTarget
    {
       private final File classFileLocation;
@@ -245,10 +353,15 @@ public class TransformerMojo extends AbstractMojo
 
       public TransformationTarget(String className) throws MojoExecutionException
       {
+         this(className, toFile(loaderClassPath.find(className)));
+      }
+
+      public TransformationTarget(String className, File file) throws MojoExecutionException
+      {
          try
          {
-            classFileLocation = new File(loaderClassPath.find(className).toURI());
             ctClass = classPool.get(className);
+            classFileLocation = file;
          }
          catch (Throwable e)
          {
@@ -313,5 +426,10 @@ public class TransformerMojo extends AbstractMojo
    public void setTransformerClassName(String transformerClassName)
    {
       this.transformerClassName = transformerClassName;
+   }
+
+   private interface Action
+   {
+      void execute() throws MojoExecutionException;
    }
 }
