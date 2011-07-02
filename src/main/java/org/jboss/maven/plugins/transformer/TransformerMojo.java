@@ -129,22 +129,19 @@ public class TransformerMojo extends AbstractMojo
 
       File parent = file.getParentFile();
       final File temp = new File(parent, file.getName() + ".tmp");
-      if (temp.exists())
-      {
-         getLog().info("Temp dir already exists, potential old code present: " + temp);
-      }
-      else
-      {
-         if (temp.mkdir() == false)
-            throw new IllegalArgumentException("Cannot create temp dir: " + temp);
-      }
 
       try
       {
+         delete(temp);
+         if (temp.mkdir() == false)
+            throw new IllegalArgumentException("Cannot create temp dir: " + temp);
+
          final JarFile jarFile = new JarFile(file);
          final FileFilter filter = getFilter();
+         ClassLoader parentCL = TransformerMojo.class.getClassLoader();
+         ClassLoader cl = new URLClassLoader(new URL[]{file.toURI().toURL()}, parentCL);
 
-         execute(TransformerMojo.class.getClassLoader(), new Action()
+         execute(cl, new Action()
          {
             public void execute() throws MojoExecutionException
             {
@@ -153,6 +150,9 @@ public class TransformerMojo extends AbstractMojo
                {
                   JarEntry entry = entries.nextElement();
                   String name = entry.getName();
+                  if (name.toUpperCase().contains("MANIFEST.MF"))
+                     continue;
+
                   File file = new File(temp, name);
                   if (entry.isDirectory())
                   {
@@ -164,8 +164,7 @@ public class TransformerMojo extends AbstractMojo
 
                      if (name.endsWith(".class") && (filter == null || filter.accept(file)))
                      {
-                        String className = name.replace("/", ".");
-                        TransformationTarget tt = new TransformationTarget(className, file);
+                        TransformationTarget tt = new TransformationTarget(toClassName(name), file);
                         tt.writeOutChanges();
                      }
                      else // just write down the file
@@ -197,7 +196,10 @@ public class TransformerMojo extends AbstractMojo
             }
          });
 
-         File copy = new File(parent, file.getName() + ".copy");
+         File copy = new File(parent, "copy-" + file.getName());
+         if (copy.exists() && copy.delete() == false)
+            throw new IOException("Cannot delete copy jar: " + copy);
+
          FileOutputStream fos = new FileOutputStream(copy);
          JarOutputStream jos = new JarOutputStream(fos, jarFile.getManifest());
          try
@@ -208,7 +210,7 @@ public class TransformerMojo extends AbstractMojo
          }
          finally
          {
-            safeClose(fos);
+            safeClose(jos);
          }
       }
       catch (Exception e)
@@ -226,6 +228,25 @@ public class TransformerMojo extends AbstractMojo
       catch (Exception ignored)
       {
       }
+   }
+
+   protected static void delete(File file) throws IOException
+   {
+      if (file == null || file.exists() == false)
+         return;
+
+      if (file.isDirectory())
+      {
+         File[] files = file.listFiles();
+         if (files == null)
+            throw new IOException("Null files, weird I/O error: " + file);
+
+         for (File f : files)
+            delete(f);
+      }
+
+      if (file.delete() == false)
+         throw new IOException("Cannot delete file: " + file);
    }
 
    protected void writeJar(JarOutputStream jos, File src, String prefix) throws IOException
@@ -274,6 +295,8 @@ public class TransformerMojo extends AbstractMojo
     */
    public void execute() throws MojoExecutionException, MojoFailureException
    {
+      getLog().info("Transforming classes: filter = " + filterPattern + ", transformer = " + transformerClassName);
+
       execute(buildProjectCompileClassLoader(), new Action()
       {
          public void execute() throws MojoExecutionException
@@ -327,7 +350,7 @@ public class TransformerMojo extends AbstractMojo
       {
          if (name.endsWith(".class"))
          {
-            TransformationTarget tt = new TransformationTarget(name);
+            TransformationTarget tt = new TransformationTarget(toClassName(name));
             tt.writeOutChanges();
          }
       }
@@ -448,6 +471,12 @@ public class TransformerMojo extends AbstractMojo
       }
    }
 
+   protected static String toClassName(String fileName)
+   {
+      int len = fileName.length() - 6; // 6 ~ .class
+      return fileName.replace("/", ".").substring(0, len);
+   }
+
    class TransformationTarget
    {
       private final File classFileLocation;
@@ -473,7 +502,7 @@ public class TransformerMojo extends AbstractMojo
 
       protected void writeOutChanges() throws MojoExecutionException
       {
-         getLog().info("writing injection changes back [" + classFileLocation.getAbsolutePath() + "]");
+         getLog().info("writing transformation changes [" + classFileLocation.getAbsolutePath() + "]");
          try
          {
             OutputStream out = new FileOutputStream(classFileLocation);
