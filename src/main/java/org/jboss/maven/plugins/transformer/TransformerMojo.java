@@ -334,7 +334,7 @@ public class TransformerMojo extends AbstractMojo
    {
       if (current.isDirectory())
       {
-         File[] files = current.listFiles(filter);
+         File[] files = current.listFiles();
          if (files == null)
             throw new IllegalArgumentException("Null files, weird I/O error: " + current);
 
@@ -348,7 +348,7 @@ public class TransformerMojo extends AbstractMojo
       }
       else
       {
-         if (name.endsWith(".class"))
+         if (name.endsWith(".class") && (filter == null || filter.accept(current)))
          {
             TransformationTarget tt = new TransformationTarget(toClassName(name));
             tt.writeOutChanges();
@@ -505,16 +505,19 @@ public class TransformerMojo extends AbstractMojo
          getLog().info("writing transformation changes [" + classFileLocation.getAbsolutePath() + "]");
          try
          {
+            byte[] original = ctClass.toBytecode();
+            byte[] transformed = getTransformer().transform(classLoader, ctClass.getName(), null, null, original);
+            if (transformed == null || transformed.length == 0)
+               return;
+
             OutputStream out = new FileOutputStream(classFileLocation);
             try
             {
-               byte[] original = ctClass.toBytecode();
-               byte[] transformed = getTransformer().transform(classLoader, ctClass.getName(), null, null, original);
                out.write(transformed);
                out.flush();
                if (classFileLocation.setLastModified(System.currentTimeMillis()) == false)
                {
-                  getLog().info("Unable to manually update class file timestamp");
+                  getLog().info("Unable to manually update class file timestamp: " + classFileLocation);
                }
             }
             finally
