@@ -175,9 +175,7 @@ public class TransformerMojo extends AbstractMojo
                            FileOutputStream os = new FileOutputStream(file);
                            try
                            {
-                              int b;
-                              while ((b = is.read()) != -1)
-                                 os.write(b);
+                              copyStream(is, os);
                               os.flush();
                            }
                            finally
@@ -216,6 +214,16 @@ public class TransformerMojo extends AbstractMojo
       catch (Exception e)
       {
          throw new RuntimeException(e);
+      }
+   }
+
+   protected static void copyStream(final InputStream in, final OutputStream out) throws IOException
+   {
+      final byte[] bytes = new byte[8192];
+      int cnt;
+      while ((cnt = in.read(bytes)) != -1)
+      {
+         out.write(bytes, 0, cnt);
       }
    }
 
@@ -278,9 +286,7 @@ public class TransformerMojo extends AbstractMojo
          FileInputStream in = new FileInputStream(src);
          try
          {
-            int b;
-            while ((b = in.read()) != -1)
-               jos.write(b);
+            copyStream(in, jos);
          }
          finally
          {
