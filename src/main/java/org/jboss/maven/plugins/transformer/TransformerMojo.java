@@ -188,9 +188,9 @@ public class TransformerMojo extends AbstractMojo {
 
             File old = new File(parent, "old-" + original.getName());
             if (original.renameTo(old) == false)
-                throw new IllegalArgumentException("Cannot rename original " + original + " to old: " + old);
+                throw new IllegalArgumentException("Cannot rename original: " + original + " to old: " + old);
             if (copy.renameTo(original) == false)
-                throw new IllegalArgumentException("Cannot rename copy " + original + " to actual original: " + old);
+                throw new IllegalArgumentException("Cannot rename copy: " + copy + " to actual original: " + original);
 
         } catch (RuntimeException e) {
             throw e;
