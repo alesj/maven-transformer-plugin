@@ -40,9 +40,9 @@
     </licenses>
 
     <scm>
-        <connection>scm:git:git://github.com/alesj/maven-transformer-plugin.git</connection>
-        <developerConnection>scm:git:git://github.com/alesj/maven-transformer-plugin.git</developerConnection>
-        <url>scm:git:git://github.com/alesj/maven-transformer-plugin.git</url>
+        <connection>scm:git:git@github.com:alesj/maven-transformer-plugin.git</connection>
+        <developerConnection>scm:git:git@github.com:alesj/maven-transformer-plugin.git</developerConnection>
+        <url>scm:git:git@github.com:alesj/maven-transformer-plugin.git</url>
     </scm>
 
     <dependencies>
