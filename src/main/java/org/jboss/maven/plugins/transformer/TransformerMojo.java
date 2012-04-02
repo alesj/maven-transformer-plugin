@@ -117,7 +117,7 @@ public class TransformerMojo extends AbstractMojo {
 
     protected void transformJar(String jar) {
         final File original = new File(jar);
-        if (original.exists() == false)
+        if (!original.exists())
             throw new IllegalArgumentException("No such jar file: " + jar);
 
         File parent = original.getParentFile();
@@ -125,7 +125,7 @@ public class TransformerMojo extends AbstractMojo {
 
         try {
             delete(temp);
-            if (temp.mkdir() == false)
+            if (!temp.mkdir())
                 throw new IllegalArgumentException("Cannot create temp dir: " + temp);
 
             final JarFile jarFile = new JarFile(original);
@@ -173,7 +173,7 @@ public class TransformerMojo extends AbstractMojo {
             });
 
             File copy = new File(parent, "copy-" + original.getName());
-            if (copy.exists() && copy.delete() == false)
+            if (copy.exists() && !copy.delete())
                 throw new IOException("Cannot delete copy jar: " + copy);
 
             FileOutputStream fos = new FileOutputStream(copy);
@@ -187,9 +187,9 @@ public class TransformerMojo extends AbstractMojo {
             }
 
             File old = new File(parent, "old-" + original.getName());
-            if (original.renameTo(old) == false)
+            if (!original.renameTo(old))
                 throw new IllegalArgumentException("Cannot rename original: " + original + " to old: " + old);
-            if (copy.renameTo(original) == false)
+            if (!copy.renameTo(original))
                 throw new IllegalArgumentException("Cannot rename copy: " + copy + " to actual original: " + original);
 
         } catch (RuntimeException e) {
@@ -215,7 +215,7 @@ public class TransformerMojo extends AbstractMojo {
     }
 
     protected static void delete(File file) throws IOException {
-        if (file == null || file.exists() == false)
+        if (file == null || !file.exists())
             return;
 
         if (file.isDirectory()) {
@@ -227,7 +227,7 @@ public class TransformerMojo extends AbstractMojo {
                 delete(f);
         }
 
-        if (file.delete() == false)
+        if (!file.delete())
             throw new IOException("Cannot delete file: " + file);
     }
 
@@ -439,7 +439,7 @@ public class TransformerMojo extends AbstractMojo {
                 try {
                     out.write(transformed);
                     out.flush();
-                    if (classFileLocation.setLastModified(System.currentTimeMillis()) == false) {
+                    if (!classFileLocation.setLastModified(System.currentTimeMillis())) {
                         getLog().info("Unable to manually update class file timestamp: " + classFileLocation);
                     }
                 } finally {
