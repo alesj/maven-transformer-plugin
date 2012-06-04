@@ -22,6 +22,10 @@
 
 package org.jboss.maven.plugins.transformer;
 
+import javassist.ClassPool;
+import javassist.CtClass;
+import javassist.LoaderClassPath;
+
 import java.io.Closeable;
 import java.io.File;
 import java.io.FileFilter;
@@ -42,14 +46,11 @@ import java.util.logging.Logger;
 import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 
-import javassist.ClassPool;
-import javassist.CtClass;
-import javassist.LoaderClassPath;
-
 /**
  * Transform current classes with ClassFileTransformer instance.
  *
  * @author <a href="mailto:ales.justin@jboss.org">Ales Justin</a>
+ * @author <a href="mailto:mluksa@redhat.com">Marko Luksa</a>
  */
 public class TransformerUtils {
     /**
@@ -105,67 +106,28 @@ public class TransformerUtils {
             throw new IllegalArgumentException("No such jar file: " + jar);
 
         File parent = original.getParentFile();
-        final File temp = new File(parent, original.getName() + ".tmp");
+        File temp = new File(parent, original.getName() + ".tmp");
 
         try {
-            delete(temp);
-            if (temp.mkdir() == false)
-                throw new IllegalArgumentException("Cannot create temp dir: " + temp);
-
-            final JarFile jarFile = new JarFile(original);
-            final FileFilter filter = getFilter();
-            ClassLoader parentCL = TransformerUtils.class.getClassLoader();
-            ClassLoader cl = new URLClassLoader(new URL[]{original.toURI().toURL()}, parentCL);
-
-            execute(cl, new Action() {
-                public void execute() throws Exception {
-                    Enumeration<JarEntry> entries = jarFile.entries();
-                    while (entries.hasMoreElements()) {
-                        JarEntry entry = entries.nextElement();
-                        String name = entry.getName();
-                        if (name.toUpperCase().contains("MANIFEST.MF"))
-                            continue;
-
-                        File file = new File(temp, name);
-                        if (entry.isDirectory()) {
-                            file.mkdirs(); // create dirs
-                        } else {
-                            file.getParentFile().mkdirs(); // make sure we have dirs
-
-                            if (name.endsWith(".class") && (filter == null || filter.accept(file))) {
-                                TransformationTarget tt = new TransformationTarget(toClassName(name), file);
-                                tt.writeOutChanges();
-                            } else {
-                                InputStream is = jarFile.getInputStream(entry);
-                                FileOutputStream os = new FileOutputStream(file);
-                                try {
-                                    copyStream(is, os);
-                                    os.flush();
-                                } finally {
-                                    safeClose(is);
-                                    safeClose(os);
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-
             File copy = new File(parent, "copy-" + original.getName());
             if (copy.exists() && copy.delete() == false)
                 throw new IOException("Cannot delete copy jar: " + copy);
 
-            FileOutputStream fos = new FileOutputStream(copy);
-            JarOutputStream jos = new JarOutputStream(fos, jarFile.getManifest());
+            delete(temp);
+            if (temp.mkdir() == false)
+                throw new IllegalArgumentException("Cannot create temp dir: " + temp);
+
+            JarFile jarFile = new JarFile(original);
             try {
-                for (File f : temp.listFiles())
-                    writeJar(jos, f, "");
-                jos.flush();
+                transformIntoTempDir(original, temp, jarFile);
+                createJarFromTempDir(temp, copy, jarFile);
             } finally {
-                safeClose(jos);
+                jarFile.close();
             }
 
             File old = new File(parent, "old-" + original.getName());
+            if (old.exists() && old.delete() == false)
+                throw new IOException("Cannot delete old: " + old);
             if (original.renameTo(old) == false)
                 throw new IllegalArgumentException("Cannot rename original: " + original + " to old: " + old);
             if (copy.renameTo(original) == false)
@@ -175,6 +137,67 @@ public class TransformerUtils {
             throw e;
         } catch (Exception e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    private void transformIntoTempDir(File original, final File temp, final JarFile jarFile) throws Exception {
+        final FileFilter filter = getFilter();
+        ClassLoader parentCL = TransformerUtils.class.getClassLoader();
+        ClassLoader cl = new URLClassLoader(new URL[]{original.toURI().toURL()}, parentCL);
+
+        execute(cl, new Action() {
+            public void execute() throws Exception {
+                Enumeration<JarEntry> entries = jarFile.entries();
+                while (entries.hasMoreElements()) {
+                    processJarEntry(entries.nextElement());
+                }
+            }
+
+            private void processJarEntry(JarEntry entry) throws Exception {
+                String name = entry.getName();
+                if (name.toUpperCase().contains("MANIFEST.MF"))
+                    return;
+
+                File file = new File(temp, name);
+                if (entry.isDirectory()) {
+                    file.mkdirs(); // create dirs
+                } else {
+                    file.getParentFile().mkdirs(); // make sure we have dirs
+
+                    if (name.endsWith(".class") && (filter == null || filter.accept(file))) {
+                        transform(name, file);
+                    } else {
+                        copy(entry, file);
+                    }
+                }
+            }
+
+            private void transform(String name, File file) throws Exception {
+                TransformationTarget tt = new TransformationTarget(toClassName(name), file);
+                tt.writeOutChanges();
+            }
+
+            private void copy(JarEntry entry, File file) throws IOException {
+                InputStream is = jarFile.getInputStream(entry);
+                FileOutputStream os = new FileOutputStream(file);
+                try {
+                    copyStream(is, os);
+                } finally {
+                    safeClose(is);
+                    safeClose(os);
+                }
+            }
+        });
+    }
+
+    private void createJarFromTempDir(File temp, File copy, JarFile jarFile) throws IOException {
+        FileOutputStream fos = new FileOutputStream(copy);
+        JarOutputStream jos = new JarOutputStream(fos, jarFile.getManifest());
+        try {
+            for (File f : temp.listFiles())
+                writeJar(jos, f, "");
+        } finally {
+            safeClose(jos);
         }
     }
 
@@ -366,12 +389,12 @@ public class TransformerUtils {
             OutputStream out = new FileOutputStream(classFileLocation);
             try {
                 out.write(transformed);
-                out.flush();
-                if (classFileLocation.setLastModified(System.currentTimeMillis()) == false) {
-                    getLog().info("Unable to manually update class file timestamp: " + classFileLocation);
-                }
             } finally {
                 safeClose(out);
+            }
+
+            if (classFileLocation.setLastModified(System.currentTimeMillis()) == false) {
+                getLog().info("Unable to manually update class file timestamp: " + classFileLocation);
             }
         }
     }
