@@ -72,20 +72,30 @@ public class TransformerMojo extends AbstractMojo {
      */
     protected String transformerClassName;
 
+
+    /**
+     * The output type.
+     *
+     * @parameter
+     * @required
+     */
+    protected String output;
+
     /**
      * {@inheritDoc}
      */
     public void execute() throws MojoExecutionException, MojoFailureException {
-        getLog().info("Transforming classes: filter = " + filterPattern + ", transformer = " + transformerClassName);
+        getLog().info("Transforming classes: filter = " + filterPattern + ", transformer = " + transformerClassName + ", output = " + output);
 
         final TransformerUtils utils = new TransformerUtils();
         utils.setTransformerClassName(transformerClassName);
         utils.setFilterPattern(filterPattern);
         try {
-            utils.execute(buildProjectCompileClassLoader(), new Action() {
+            final boolean isTest = "test".equals(this.output);
+            utils.execute(buildProjectCompileClassLoader(isTest), new Action() {
                 public void execute() throws Exception {
                     Build build = project.getBuild();
-                    String output = build.getOutputDirectory();
+                    String output =  isTest ? build.getTestOutputDirectory() : build.getOutputDirectory();
                     File outputDir = new File(output);
 
                     utils.recurse(outputDir, "");
@@ -99,14 +109,15 @@ public class TransformerMojo extends AbstractMojo {
     /**
      * Builds a {@link ClassLoader} based on the maven project's compile classpath elements.
      *
+     * @param isTest do we modify tests
      * @return The {@link ClassLoader} made up of the maven project's compile classpath elements.
      * @throws MojoExecutionException Indicates an issue processing one of the classpath elements
      */
-    private ClassLoader buildProjectCompileClassLoader() throws MojoExecutionException {
+    private ClassLoader buildProjectCompileClassLoader(boolean isTest) throws MojoExecutionException {
         List<URL> classPathUrls = new ArrayList<URL>();
-        for (String path : projectCompileClasspathElements()) {
+        for (String path : projectCompileClasspathElements(isTest)) {
             try {
-                getLog().debug("Adding project compile classpath element : " + path);
+                getLog().info("Adding project compile classpath element : " + path);
                 classPathUrls.add(new File(path).toURI().toURL());
             } catch (MalformedURLException e) {
                 throw new MojoExecutionException("Unable to build path URL [" + path + "]");
@@ -119,13 +130,17 @@ public class TransformerMojo extends AbstractMojo {
      * Essentially a call to {@link MavenProject#getCompileClasspathElements} except that here we
      * cast it to the generic type and internally handle {@link org.apache.maven.artifact.DependencyResolutionRequiredException}.
      *
+     * @param isTest do we modify tests
      * @return The compile classpath elements
      * @throws MojoExecutionException Indicates a {@link org.apache.maven.artifact.DependencyResolutionRequiredException} was encountered
      */
     @SuppressWarnings({"unchecked"})
-    private List<String> projectCompileClasspathElements() throws MojoExecutionException {
+    private List<String> projectCompileClasspathElements(boolean isTest) throws MojoExecutionException {
         try {
-            return (List<String>) project.getCompileClasspathElements();
+            if (isTest)
+                return project.getTestClasspathElements();
+            else
+                return project.getCompileClasspathElements();
         } catch (DependencyResolutionRequiredException e) {
             throw new MojoExecutionException("Call to MavenProject#getCompileClasspathElements required dependency resolution");
         }
@@ -153,5 +168,13 @@ public class TransformerMojo extends AbstractMojo {
 
     public void setTransformerClassName(String transformerClassName) {
         this.transformerClassName = transformerClassName;
+    }
+
+    public String getOutput() {
+        return output;
+    }
+
+    public void setOutput(String output) {
+        this.output = output;
     }
 }

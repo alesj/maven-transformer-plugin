@@ -346,9 +346,9 @@ public class TransformerUtils {
         return transformer;
     }
 
-    protected static File toFile(URL url) throws Exception {
+    protected static File toFile(String className, URL url) throws Exception {
         if (url == null)
-            throw new Exception("No such class name: " + url);
+            throw new Exception("No such class name: " + className + ", wrong classloader?");
 
         try {
             return new File(url.toURI());
@@ -367,7 +367,7 @@ public class TransformerUtils {
         private final CtClass ctClass;
 
         public TransformationTarget(String className) throws Exception {
-            this(className, toFile(loaderClassPath.find(className)));
+            this(className, toFile(className, loaderClassPath.find(className)));
         }
 
         public TransformationTarget(String className, File file) throws Exception {
