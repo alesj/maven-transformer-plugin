@@ -134,13 +134,13 @@ public class TransformerMojo extends AbstractMojo {
      * @return The compile classpath elements
      * @throws MojoExecutionException Indicates a {@link org.apache.maven.artifact.DependencyResolutionRequiredException} was encountered
      */
-    @SuppressWarnings({"unchecked"})
     private List<String> projectCompileClasspathElements(boolean isTest) throws MojoExecutionException {
         try {
-            if (isTest)
+            if (isTest) {
                 return project.getTestClasspathElements();
-            else
+            } else {
                 return project.getCompileClasspathElements();
+            }
         } catch (DependencyResolutionRequiredException e) {
             throw new MojoExecutionException("Call to MavenProject#getCompileClasspathElements required dependency resolution");
         }
