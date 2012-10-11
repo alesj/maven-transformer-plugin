@@ -143,51 +143,60 @@ public class TransformerUtils {
     private void transformIntoTempDir(File original, final File temp, final JarFile jarFile) throws Exception {
         final FileFilter filter = getFilter();
         ClassLoader parentCL = TransformerUtils.class.getClassLoader();
-        ClassLoader cl = new URLClassLoader(new URL[]{original.toURI().toURL()}, parentCL);
-
-        execute(cl, new Action() {
-            public void execute() throws Exception {
-                Enumeration<JarEntry> entries = jarFile.entries();
-                while (entries.hasMoreElements()) {
-                    processJarEntry(entries.nextElement());
-                }
-            }
-
-            private void processJarEntry(JarEntry entry) throws Exception {
-                String name = entry.getName();
-                if (name.toUpperCase().contains("MANIFEST.MF"))
-                    return;
-
-                File file = new File(temp, name);
-                if (entry.isDirectory()) {
-                    file.mkdirs(); // create dirs
-                } else {
-                    file.getParentFile().mkdirs(); // make sure we have dirs
-
-                    if (name.endsWith(".class") && (filter == null || filter.accept(file))) {
-                        transform(name, file);
-                    } else {
-                        copy(entry, file);
+        URLClassLoader cl = new URLClassLoader(new URL[]{original.toURI().toURL()}, parentCL);
+        try {
+            execute(cl, new Action() {
+                public void execute() throws Exception {
+                    Enumeration<JarEntry> entries = jarFile.entries();
+                    while (entries.hasMoreElements()) {
+                        processJarEntry(entries.nextElement());
                     }
                 }
-            }
 
-            private void transform(String name, File file) throws Exception {
-                TransformationTarget tt = new TransformationTarget(toClassName(name), file);
-                tt.writeOutChanges();
-            }
+                private void processJarEntry(JarEntry entry) throws Exception {
+                    String name = entry.getName();
+                    if (name.toUpperCase().contains("MANIFEST.MF"))
+                        return;
 
-            private void copy(JarEntry entry, File file) throws IOException {
-                InputStream is = jarFile.getInputStream(entry);
-                FileOutputStream os = new FileOutputStream(file);
-                try {
-                    copyStream(is, os);
-                } finally {
-                    safeClose(is);
-                    safeClose(os);
+                    File file = new File(temp, name);
+                    if (entry.isDirectory()) {
+                        file.mkdirs(); // create dirs
+                    } else {
+                        file.getParentFile().mkdirs(); // make sure we have dirs
+
+                        if (name.endsWith(".class") && (filter == null || filter.accept(file))) {
+                            transform(name, file);
+                        } else {
+                            copy(entry, file);
+                        }
+                    }
                 }
+
+                private void transform(String name, File file) throws Exception {
+                    TransformationTarget tt = new TransformationTarget(toClassName(name), file);
+                    tt.writeOutChanges();
+                }
+
+                private void copy(JarEntry entry, File file) throws IOException {
+                    InputStream is = jarFile.getInputStream(entry);
+                    FileOutputStream os = new FileOutputStream(file);
+                    try {
+                        copyStream(is, os);
+                    } finally {
+                        safeClose(is);
+                        safeClose(os);
+                    }
+                }
+            });
+        } finally {
+            //noinspection ConstantConditions
+            if (cl instanceof Closeable) {
+                Closeable closeable = (Closeable) cl;
+                closeable.close();
+            } else {
+                log.warning("Cannot close classloader for " + original.getPath());
             }
-        });
+        }
     }
 
     private void createJarFromTempDir(File temp, File copy, JarFile jarFile) throws IOException {
