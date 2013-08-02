@@ -97,10 +97,20 @@ public class TransformerUtils {
         tm.filterPattern = (args.length > 2) ? args[2] : null;
 
         String jar = args[0];
-        tm.transformJar(jar);
+        boolean outputJarArgSpecified = args.length > 3;
+        if (outputJarArgSpecified) {
+            String outputJar = args[3];
+            tm.transformJar(jar, outputJar);
+        } else {
+            tm.transformJar(jar);
+        }
     }
 
     protected void transformJar(String jar) {
+        transformJar(jar, jar);
+    }
+
+    protected void transformJar(String jar, String outputJar) {
         final File original = new File(jar);
         if (original.exists() == false)
             throw new IllegalArgumentException("No such jar file: " + jar);
@@ -109,9 +119,9 @@ public class TransformerUtils {
         File temp = new File(parent, original.getName() + ".tmp");
 
         try {
-            File copy = new File(parent, "copy-" + original.getName());
-            if (copy.exists() && copy.delete() == false)
-                throw new IOException("Cannot delete copy jar: " + copy);
+            File transformedJar = outputJar.equals(jar) ? new File(parent, "copy-" + original.getName()) : new File(outputJar);
+            if (transformedJar.exists() && transformedJar.delete() == false)
+                throw new IOException("Cannot delete copy jar: " + transformedJar);
 
             delete(temp);
             if (temp.mkdir() == false)
@@ -120,19 +130,20 @@ public class TransformerUtils {
             JarFile jarFile = new JarFile(original);
             try {
                 transformIntoTempDir(original, temp, jarFile);
-                createJarFromTempDir(temp, copy, jarFile);
+                createJarFromTempDir(temp, transformedJar, jarFile);
             } finally {
                 jarFile.close();
             }
 
-            File old = new File(parent, "old-" + original.getName());
-            if (old.exists() && old.delete() == false)
-                throw new IOException("Cannot delete old: " + old);
-            if (original.renameTo(old) == false)
-                throw new IllegalArgumentException("Cannot rename original: " + original + " to old: " + old);
-            if (copy.renameTo(original) == false)
-                throw new IllegalArgumentException("Cannot rename copy: " + copy + " to actual original: " + original);
-
+            if (outputJar.equals(jar)) {
+                File old = new File(parent, "old-" + original.getName());
+                if (old.exists() && old.delete() == false)
+                    throw new IOException("Cannot delete old: " + old);
+                if (original.renameTo(old) == false)
+                    throw new IllegalArgumentException("Cannot rename original: " + original + " to old: " + old);
+                if (transformedJar.renameTo(original) == false)
+                    throw new IllegalArgumentException("Cannot rename copy: " + transformedJar + " to actual original: " + original);
+            }
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
